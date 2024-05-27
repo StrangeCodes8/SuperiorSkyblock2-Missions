@@ -1,0 +1,48 @@
+plugins {
+    id 'java'
+    id 'io.github.goooler.shadow' version '8.1.7'
+    id 'maven-publish'
+}
+
+group 'SuperiorSkyblock-Missions'
+
+project.ext {
+    targetFolder = file("target/")
+}
+
+subprojects {
+    apply plugin: 'java'
+    apply plugin: 'io.github.goooler.shadow'
+
+    repositories {
+        maven { url 'https://repo.bg-software.com/repository/nms/' }
+        maven { url 'https://repo.bg-software.com/repository/api/' }
+        maven { url 'https://repo.bg-software.com/repository/dependencies/' }
+        maven { url 'https://repo.bg-software.com/repository/common/' }
+    }
+
+    dependencies {
+        compileOnly "org.spigotmc:v1_16_R3:latest"
+        compileOnly "org.spigotmc:v1_8_R3-Taco:latest"
+        compileOnly "com.bgsoftware.common.reflection:ReflectionUtils:1.0.2"
+        compileOnly "com.bgsoftware:SuperiorSkyblockAPI:2023.2"
+    }
+
+    shadowJar {
+        relocate 'com.bgsoftware.common', 'com.bgsoftware.superiorskyblock.libs.com.bgsoftware.common'
+    }
+
+    build {
+        dependsOn shadowJar
+    }
+}
+
+build {
+    dependsOn shadowJar
+}
+
+publish.shouldRunAfter shadowJar
+shadowJar.shouldRunAfter build
+
+shadowJar.dependsOn subprojects.build
+compileJava.dependsOn childProjects.values().shadowJar
