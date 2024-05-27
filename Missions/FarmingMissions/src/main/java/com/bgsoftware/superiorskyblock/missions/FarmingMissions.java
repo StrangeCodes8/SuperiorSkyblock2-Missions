@@ -153,6 +153,8 @@ public final class FarmingMissions extends Mission<DataTracker> implements Liste
             for (String uuid : grownPlants.getKeys(false)) {
                 DataTracker farmingTracker = new DataTracker();
                 UUID playerUUID = UUID.fromString(uuid);
+                if (missionCompleters.contains(uuid) || missionSlackers.contains(uuid))
+                    continue;
                 SuperiorPlayer superiorPlayer = this.plugin.getPlayers().getSuperiorPlayer(playerUUID);
                 insertData(superiorPlayer, farmingTracker);
 
@@ -168,6 +170,8 @@ public final class FarmingMissions extends Mission<DataTracker> implements Liste
                 BlockPosition blockPosition = BlockPosition.deserialize(locationKey);
                 try {
                     if (blockPosition != null)
+                        if (missionCompleters.contains(placedPlants.getString(locationKey)) || missionSlackers.contains(placedPlants.getString(locationKey)))
+                            continue;
                         playerPlacedPlants.put(blockPosition, UUID.fromString(placedPlants.getString(locationKey)));
                 } catch (IllegalArgumentException ignored) {
                 }
