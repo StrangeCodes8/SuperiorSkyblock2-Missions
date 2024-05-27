@@ -1,6 +1,9 @@
 package com.bgsoftware.superiorskyblock.missions;
 
 import com.bgsoftware.superiorskyblock.api.SuperiorSkyblock;
+import com.bgsoftware.superiorskyblock.api.SuperiorSkyblockAPI;
+import com.bgsoftware.superiorskyblock.api.data.DatabaseBridge;
+import com.bgsoftware.superiorskyblock.api.data.DatabaseFilter;
 import com.bgsoftware.superiorskyblock.api.island.Island;
 import com.bgsoftware.superiorskyblock.api.missions.Mission;
 import com.bgsoftware.superiorskyblock.api.missions.MissionLoadException;
@@ -36,13 +39,7 @@ import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import javax.annotation.Nullable;
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Optional;
-import java.util.UUID;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 public final class FarmingMissions extends Mission<DataTracker> implements Listener {
@@ -59,11 +56,12 @@ public final class FarmingMissions extends Mission<DataTracker> implements Liste
     private boolean resetAfterFinish;
 
     private SuperiorSkyblock plugin;
+    private static List<String> missionCompleters = new ArrayList<>(); //add list to hold UUIDs of players who completed the mission
+    private static List<String> missionSlackers = new ArrayList<>(); //add list to hold UUIDs of players that haven't played in a giving period of time
 
     @Override
     public void load(JavaPlugin plugin, ConfigurationSection section) throws MissionLoadException {
         this.plugin = (SuperiorSkyblock) plugin;
-
         ConfigurationSection requiredPlantsSection = section.getConfigurationSection("required-plants");
 
         if (requiredPlantsSection == null)
@@ -119,6 +117,7 @@ public final class FarmingMissions extends Mission<DataTracker> implements Liste
 
     @Override
     public void onComplete(SuperiorPlayer superiorPlayer) {
+        missionCompleters.add(superiorPlayer.getUniqueId().toString()); // add to completed list once player has completed mission so we don't have to requery the database
         if (resetAfterFinish)
             clearData(superiorPlayer);
     }
@@ -132,23 +131,29 @@ public final class FarmingMissions extends Mission<DataTracker> implements Liste
     public void saveProgress(ConfigurationSection section) {
         for (Map.Entry<SuperiorPlayer, DataTracker> entry : entrySet()) {
             String uuid = entry.getKey().getUniqueId().toString();
+            if (missionCompleters.contains(uuid) || missionSlackers.contains(uuid))
+                continue;
             entry.getValue().getCounts().forEach((plant, count) ->
-                    section.set("grown-plants." + uuid + "." + plant, count.get()));
+                section.set("grown-plants." + uuid + "." + plant, count.get()));
         }
         for (Map.Entry<BlockPosition, UUID> placedBlock : playerPlacedPlants.entrySet()) {
+            if (missionCompleters.contains(placedBlock.getValue().toString()) || missionSlackers.contains(placedBlock.getValue().toString())) //add if check for saving block data, blocks aren't saved if mission is completed. (this is only to clear the current files)
+                continue;
             section.set("placed-plants." + placedBlock.getKey().serialize(), placedBlock.getValue().toString());
         }
     }
 
     @Override
     public void loadProgress(ConfigurationSection section) {
+        loadCompleters();
+        loadSlackers();
+
         ConfigurationSection grownPlants = section.getConfigurationSection("grown-plants");
         if (grownPlants != null) {
             for (String uuid : grownPlants.getKeys(false)) {
                 DataTracker farmingTracker = new DataTracker();
                 UUID playerUUID = UUID.fromString(uuid);
                 SuperiorPlayer superiorPlayer = this.plugin.getPlayers().getSuperiorPlayer(playerUUID);
-
                 insertData(superiorPlayer, farmingTracker);
 
                 for (String key : grownPlants.getConfigurationSection(uuid).getKeys(false)) {
@@ -209,8 +214,41 @@ public final class FarmingMissions extends Mission<DataTracker> implements Liste
         if (placerUUID == null)
             return;
 
+        if(missionCompleters.contains(e.getPlayer().getUniqueId().toString()))
+            return; //prevents new blocks from being saved if the mission is already completed
+
         playerPlacedPlants.put(BlockPosition.fromBlock(e.getBlock()), placerUUID);
     }
+
+    //Functions to query database for players that have completed the mission
+    private void loadCompleters(){
+        DatabaseBridge databaseBridge = SuperiorSkyblockAPI.getStackedBlocks().getDatabaseBridge();
+        databaseBridge.loadObject("players_missions", DatabaseFilter.fromFilter("name",this.getName()),
+                this::addComplete);
+    }
+    private void loadSlackers(){
+        DatabaseBridge databaseBridge = SuperiorSkyblockAPI.getStackedBlocks().getDatabaseBridge();
+        databaseBridge.loadAllObjects("player_lastseen",
+                this::addSlackers);
+    }
+    private void addComplete(Map<String,Object> input){
+        if (input.containsKey("player")) {
+            if(Integer.parseInt(input.get("finish_count").toString()) > 0) {
+                missionCompleters.add(input.get("player").toString());
+            }
+        }else{
+            this.plugin.getLogger().info("[SuperiorSkyblock2] player data not found for " + this.getName()); // I don't really see a reason for these log lines to ever be hit
+        }
+    }
+    private void addSlackers(Map<String,Object> input){
+        if (input.containsKey("uuid")) {
+                if (!missionCompleters.contains(input.get("uuid").toString()))
+                    missionSlackers.add(input.get("uuid").toString());
+        }else{
+            this.plugin.getLogger().info("[SuperiorSkyblock2] player data not found for " + this.getName()); // I don't really see a reason for these log lines to ever be hit
+        }
+    }
+    //
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onBlockBreak(BlockBreakEvent e) {
@@ -452,6 +490,7 @@ public final class FarmingMissions extends Mission<DataTracker> implements Liste
         public int hashCode() {
             return Objects.hash(worldName, x, y, z);
         }
+
 
     }
 
